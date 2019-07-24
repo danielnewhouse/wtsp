@@ -1,0 +1,39 @@
+########################################################################################
+############################     Quality Control   #####################################
+########################################################################################
+
+for filename in 25*; do trim_galore -a AGATCGGAAGAGCACACGTCTGAACTCCAGTCAC $filename; done &
+for filename in 37*; do trim_galore -a AGATCGGAAGAGCACACGTCTGAACTCCAGTCAC $filename; done &
+
+
+
+
+########################################################################################
+#################################### Masked Genome #####################################
+########################################################################################
+
+##### MaskedGenome_Workflow
+trim_galore --paired 'Read1' 'Read2'
+bwa mem -t 4 /media/HardDisk2/indexes/Zalb_v1.rename.fasta White_10_093_GTCCGC_L002_R1_001_val_1.fq.gz White_10_093_GTCCGC_L002_R2_001_val_2.fq.gz > 093.sam & #for each of the 3 white PE samples
+samtools view -b -S 082.sam | samtools sort - 082.sort &
+#merge inversion scaffolds for each individual to one file
+samtools merge 092 <(samtools view -b 092.sort.bam NW_005081635.1) <(samtools view -b 092.sort.bam NW_005081812.1) <(samtools view -b 092.sort.bam NW_005081708.1) <(samtools view -b 092.sort.bam NW_005081569.1) <(samtools view -b 092.sort.bam NW_005081577.1) <(samtools view -b 092.sort.bam NW_005081742.1) <(samtools view -b 092.sort.bam NW_005081832.1) <(samtools view -b 092.sort.bam NW_005081548.1) <(samtools view -b 092.sort.bam NW_005081699.1) <(samtools view -b 092.sort.bam NW_005081620.1) <(samtools view -b 092.sort.bam NW_005081574.1) <(samtools view -b 092.sort.bam NW_005081589.1) <(samtools view -b 092.sort.bam NW_005081596.1) <(samtools view -b 092.sort.bam NW_005081611.1) <(samtools view -b 092.sort.bam NW_005081596.1) <(samtools view -b 092.sort.bam NW_005081591.1) <(samtools view -b 092.sort.bam NW_005081642.1) <(samtools view -b 092.sort.bam NW_005081561.1) <(samtools view -b 092.sort.bam NW_005081632.1) <(samtools view -b 092.sort.bam NW_005081596.1) <(samtools view -b 092.sort.bam NW_005081561.1) <(samtools view -b 092.sort.bam NW_005081582.1) <(samtools view -b 092.sort.bam NW_005081569.1) <(samtools view -b 092.sort.bam NW_005081654.1) <(samtools view -b 092.sort.bam NW_005081553.1) &
+#CallSNPs in inversion scaffolds
+samtools mpileup -u -t DP,DPR -f /media/HardDisk2/indexes/WTSP.masked.bowtie2.fa 083 092 093 | bcftools call -mv -Ov -o WTSP_merge.mask.calls3.vcf
+#Remove SNPs with missing data
+/usr/local/bin/vcftools_0.1.12a/bin/vcftools --vcf WTSP_blood_merge.mask.calls.vcf --max-missing 1.0 --recode
+#Keep Heterozygous_SNPs
+cat out.recode.vcf| java -jar /usr/local/bin/snpEff/SnpSift.jar filter "(DP >= 180) | isHet(GEN[083])& isHet(GEN[092])& isHet(GEN[093])" >  WTSP_3white.masked.SNPsift.filtered.vcf
+#Use SNPs to mask genome
+bedtools maskfasta -fi /media/HardDisk2/indexes/Zalb_v1.rename.fasta -bed WTSP_3white.masked.SNPsift.filtered.vcf -fo WTSP.masked.fasta
+
+
+########################################################################################
+############################ Genome-Based Analysis #####################################
+########################################################################################
+
+#STAR mapping
+/usr/local/bin/STAR-2.5.3a/STAR --runThreadN 8 --runMode genomeGenerate --genomeDir /media/HardDisk2/indexes/STAR_genome/ --genomeFastaFiles /media/HardDisk2/indexes/STAR_genome/WTSP.masked.fasta --sjdbGTFfile /media/HardDisk2/indexes/ref_Zonotrichia_albicollis-1.0.1_top_level.gff3 --sjdbOverhang 99
+/usr/local/bin/STAR-2.5.3a/STAR --runThreadN 8 --genomeDir /media/HardDisk2/indexes/STAR_genome/ --readFilesIn /media/BigArseRAID/WTSP_Blood/Trimmed_Reads/25875_TTAGGC_L002_R1_001_trimmed.fq.gz --readFilesCommand zcat --outSAMtype BAM SortedByCoordinate
+for filename in *.fq.gz; do /usr/local/bin/STAR-2.5.3a/STAR --runThreadN 8 --genomeDir /media/HardDisk2/indexes/STAR_genome/ --readFilesIn /media/BigArseRAID/WTSP_Blood/Trimmed_Reads/$filename --readFilesCommand zcat --outSAMtype BAM SortedByCoordinate --outFileNamePrefix STAR_out/$filename; done
+for filename in *.bam; do htseq-count -f bam -s reverse -i gene $filename /media/HardDisk2/indexes/ref_Zonotrichia_albicollis-1.0.1_top_level.gff3 > $filename.gene.counts; done &
